@@ -4,14 +4,16 @@ import 'package:qingmooo/services/coin_service.dart';
 import 'package:qingmooo/widgets/coin_icon.dart';
 import 'dart:io';
 
-class PublishScreen extends StatefulWidget {
-  const PublishScreen({super.key});
+/// 改进的PublishScreen - 添加生命周期监听和实时金币更新
+class PublishScreenImproved extends StatefulWidget {
+  const PublishScreenImproved({super.key});
 
   @override
-  State<PublishScreen> createState() => _PublishScreenState();
+  State<PublishScreenImproved> createState() => _PublishScreenImprovedState();
 }
 
-class _PublishScreenState extends State<PublishScreen> {
+class _PublishScreenImprovedState extends State<PublishScreenImproved>
+    with WidgetsBindingObserver {
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   final List<XFile> _selectedImages = [];
@@ -19,21 +21,54 @@ class _PublishScreenState extends State<PublishScreen> {
   bool _isPublishing = false;
   int _currentCoins = 0;
 
+  // 金币流订阅
+  late Stream<int> _coinStream;
+
   @override
   void initState() {
     super.initState();
+    // 添加生命周期观察者
+    WidgetsBinding.instance.addObserver(this);
     _loadCoins();
+    _setupCoinListener();
+  }
+
+  /// 设置金币变化监听
+  void _setupCoinListener() {
+    // 注意：这里假设CoinService已经实现了coinStream
+    // 如果使用原始的CoinService，需要先升级到改进版本
+    _coinStream = CoinService.coinStream;
+  }
+
+  /// 应用生命周期变化处理
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // 应用从后台返回时刷新金币
+      _log('应用返回前台，刷新金币');
+      _loadCoins();
+    } else if (state == AppLifecycleState.paused) {
+      _log('应用进入后台');
+    }
   }
 
   Future<void> _loadCoins() async {
-    final coins = await CoinService.getCoins();
-    setState(() {
-      _currentCoins = coins;
-    });
+    try {
+      final coins = await CoinService.getCoins();
+      if (mounted) {
+        setState(() {
+          _currentCoins = coins;
+        });
+      }
+    } catch (e) {
+      _log('加载金币失败: $e');
+    }
   }
 
   @override
   void dispose() {
+    // 移除生命周期观察者
+    WidgetsBinding.instance.removeObserver(this);
     _titleController.dispose();
     _descriptionController.dispose();
     super.dispose();
@@ -50,17 +85,13 @@ class _PublishScreenState extends State<PublishScreen> {
           } else {
             final remaining = 9 - _selectedImages.length;
             _selectedImages.addAll(images.take(remaining));
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('最多只能选择9张图片')),
-            );
+            _showSnackBar('最多只能选择9张图片');
           }
         });
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('选择图片失败: $e')),
-        );
+        _showSnackBar('选择图片失败: $e');
       }
     }
   }
@@ -73,16 +104,12 @@ class _PublishScreenState extends State<PublishScreen> {
 
   Future<void> _publish() async {
     if (_selectedImages.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请至少选择一张图片')),
-      );
+      _showSnackBar('请至少选择一张图片');
       return;
     }
 
     if (_titleController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入标题')),
-      );
+      _showSnackBar('请输入标题');
       return;
     }
 
@@ -97,35 +124,50 @@ class _PublishScreenState extends State<PublishScreen> {
       _isPublishing = true;
     });
 
-    // 模拟上传过程
-    await Future.delayed(const Duration(seconds: 2));
+    try {
+      // 模拟上传过程
+      await Future.delayed(const Duration(seconds: 2));
 
-    if (mounted) {
-      // 消耗金币
-      final success = await CoinService.publishPost();
-      
-      if (success) {
-        setState(() {
-          _isPublishing = false;
-        });
+      if (mounted) {
+        // 消耗金币
+        final success = await CoinService.publishPost();
+        
+        if (success) {
+          setState(() {
+            _isPublishing = false;
+          });
 
-        // 重新加载金币
-        await _loadCoins();
+          // 重新加载金币（虽然流会自动更新，但这里确保同步）
+          await _loadCoins();
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('发布成功！消耗10金币')),
-        );
+          _showSnackBar('发布成功！消耗10金币');
 
-        // 返回上一页
-        if (mounted) {
-          Navigator.pop(context);
+          // 返回上一页
+          if (mounted) {
+            Navigator.pop(context);
+          }
+        } else {
+          setState(() {
+            _isPublishing = false;
+          });
+          _showInsufficientCoinsDialog();
         }
-      } else {
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
           _isPublishing = false;
         });
-        _showInsufficientCoinsDialog();
+        _showSnackBar('发布失败: $e');
       }
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
     }
   }
 
@@ -184,6 +226,10 @@ class _PublishScreenState extends State<PublishScreen> {
     );
   }
 
+  void _log(String message) {
+    print('[PublishScreen] $message');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -223,13 +269,21 @@ class _PublishScreenState extends State<PublishScreen> {
                       symbolColor: Colors.white,
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      '$_currentCoins',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFFF1DBB),
-                      ),
+                    // 使用StreamBuilder实时更新金币显示
+                    StreamBuilder<int>(
+                      stream: _coinStream,
+                      initialData: _currentCoins,
+                      builder: (context, snapshot) {
+                        final coins = snapshot.data ?? _currentCoins;
+                        return Text(
+                          '$coins',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFFFF1DBB),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ),

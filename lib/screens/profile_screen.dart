@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:qingmooo/services/data_service.dart';
 import 'package:qingmooo/services/storage_service.dart';
+import 'package:qingmooo/services/coin_service.dart';
 import 'package:qingmooo/models/photo.dart';
 import 'package:qingmooo/screens/splash_screen.dart';
 import 'package:qingmooo/screens/edit_profile_screen.dart';
@@ -9,6 +10,8 @@ import 'package:qingmooo/screens/help_feedback_screen.dart';
 import 'package:qingmooo/screens/about_screen.dart';
 import 'package:qingmooo/screens/complaint_screen.dart';
 import 'package:qingmooo/screens/my_posts_screen.dart';
+import 'package:qingmooo/screens/iap_screen.dart';
+import 'package:qingmooo/widgets/coin_icon.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 
@@ -24,6 +27,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _userName = '轻陌用户';
   String _userBio = '这个人很懒，什么都没留下';
   String _userAvatar = 'assets/images/tx.jpg';
+  int _currentCoins = 0;
 
   @override
   void initState() {
@@ -36,11 +40,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final name = await StorageService.getUserName();
     final bio = await StorageService.getUserBio();
     final avatar = await StorageService.getUserAvatar();
+    final coins = await CoinService.getCoins();
     
     setState(() {
       _userName = name;
       _userBio = bio;
       _userAvatar = avatar;
+      _currentCoins = coins;
     });
   }
 
@@ -51,7 +57,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
     
     if (result == true) {
-      // 数据已更新，重新加载
+      _loadUserData();
+    }
+  }
+
+  Future<void> _navigateToRecharge() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const IAPScreen()),
+    );
+    
+    if (mounted) {
       _loadUserData();
     }
   }
@@ -81,6 +97,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               children: [
                 const SizedBox(height: 16),
                 _buildUserCard(),
+                const SizedBox(height: 20),
+                _buildCoinCard(),
                 const SizedBox(height: 20),
                 _buildMenuList(),
                 const SizedBox(height: 24),
@@ -119,106 +137,197 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   width: 1,
                 ),
               ),
-              child: Stack(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Row(
                       children: [
-                        Row(
+                        Stack(
                           children: [
-                            Stack(
-                              children: [
-                                Container(
-                                  width: 80,
-                                  height: 80,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(40),
-                                    border: Border.all(
-                                      color: Colors.white,
-                                      width: 4,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.1),
-                                        blurRadius: 10,
-                                        offset: const Offset(0, 4),
-                                      ),
-                                    ],
-                                  ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(36),
-                                    child: _buildAvatarImage(_userAvatar),
-                                  ),
+                            Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(40),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 4,
                                 ),
-                                Positioned(
-                                  bottom: 0,
-                                  right: 0,
-                                  child: Container(
-                                    width: 24,
-                                    height: 24,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF000000),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: Colors.white,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.edit,
-                                      size: 12,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _userName,
-                                    style: const TextStyle(
-                                      fontSize: 20,
-                                      fontWeight: FontWeight.w700,
-                                      color: Color(0xFF1A1A1A),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _userBio,
-                                    style: const TextStyle(
-                                      fontSize: 14,
-                                      color: Color(0xFF757575),
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.1),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 4),
                                   ),
                                 ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(36),
+                                child: _buildAvatarImage(_userAvatar),
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                width: 24,
+                                height: 24,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF000000),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.edit,
+                                  size: 12,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceAround,
-                          children: [
-                            _buildStatItem(_user.likes.toString(), '获赞'),
-                            _buildDivider(),
-                            _buildStatItem(_user.followers.toString(), '粉丝'),
-                            _buildDivider(),
-                            _buildStatItem(_user.following.toString(), '关注'),
-                          ],
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _userName,
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF1A1A1A),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _userBio,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xFF757575),
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
+                    const SizedBox(height: 24),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildStatItem(_user.likes.toString(), '获赞'),
+                        _buildDivider(),
+                        _buildStatItem(_user.followers.toString(), '粉丝'),
+                        _buildDivider(),
+                        _buildStatItem(_user.following.toString(), '关注'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCoinCard() {
+    return GestureDetector(
+      onTap: _navigateToRecharge,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFFF1DBB),
+              Color(0xFFFFB099),
+            ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFF1DBB).withValues(alpha: 0.3),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '我的金币',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const CoinIcon(
+                        size: 28,
+                        coinColor: Colors.white,
+                        symbolColor: Colors.white,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '$_currentCoins',
+                        style: const TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.5),
+                    width: 1,
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(
+                      Icons.add,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    SizedBox(width: 4),
+                    Text(
+                      '充值',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -372,7 +481,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
-                  color: isLast ? const Color(0xFFE53935) : const Color(0xFF424242),
+                  color: title == '我的钱包'
+                      ? const Color(0xFFFF1DBB)
+                      : (isLast ? const Color(0xFFE53935) : const Color(0xFF424242)),
                 ),
               ),
             ),
@@ -389,21 +500,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildAvatarImage(String avatar) {
-    // 如果是网络图片
     if (avatar.startsWith('http')) {
       return Image.network(avatar, fit: BoxFit.cover);
-    }
-    // 如果是本地文件路径（用户上传的头像）
-    else if (avatar.startsWith('/')) {
+    } else if (avatar.startsWith('/')) {
       final file = File(avatar);
       if (file.existsSync()) {
         return Image.file(file, fit: BoxFit.cover);
       }
-      // 如果文件不存在，使用默认头像
       return Image.asset('assets/images/tx.jpg', fit: BoxFit.cover);
-    }
-    // 默认资源图片
-    else {
+    } else {
       return Image.asset(avatar, fit: BoxFit.cover);
     }
   }
@@ -445,10 +550,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context); // 关闭对话框
-              // 清除所有用户数据
+              Navigator.pop(context);
               await StorageService.clearUserData();
-              // 跳转到启动页，并清除所有路由栈
+              await CoinService.clearCoinData();
               if (mounted) {
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(

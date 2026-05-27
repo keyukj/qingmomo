@@ -196,5 +196,6 @@ class StorageService {
     await _prefs.remove('blocked_users');
     await _prefs.remove('hidden_photos');
     await _prefs.remove('deleted_my_posts');
+    // 金币数据由 CoinService 管理
   }
 }

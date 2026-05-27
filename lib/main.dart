@@ -7,10 +7,14 @@ import 'package:qingmooo/screens/fav_screen.dart';
 import 'package:qingmooo/screens/profile_screen.dart';
 import 'package:qingmooo/screens/publish_screen.dart';
 import 'package:qingmooo/services/storage_service.dart';
+import 'package:qingmooo/services/coin_service.dart';
+import 'package:qingmooo/services/iap_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await StorageService.init();
+  await CoinService.init();
+  await IAPService.init();
   runApp(const QingmoooApp());
 }
 
