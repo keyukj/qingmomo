@@ -1,19 +1,21 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:qingmooo/services/coin_service.dart';
 
 class IAPService {
   static final InAppPurchase _inAppPurchase = InAppPurchase.instance;
-  static late StreamSubscription<List<PurchaseDetails>> _subscription;
+  static StreamSubscription<List<PurchaseDetails>>? _subscription;
 
-  // 内购产品ID和对应的金币数
   static const Map<String, int> productCoins = {
-    'com.qingmo.icon8': 80,      // 8元 -> 80金币
-    'com.qingmo.icon18': 180,    // 18元 -> 180金币
-    'com.qingmo.icon38': 380,    // 38元 -> 380金币
-    'com.qingmo.icon68': 680,    // 68元 -> 680金币
-    'com.qingmo.icon128': 1280,  // 128元 -> 1280金币
-    'com.qingmo.icon268': 2680,  // 268元 -> 2680金币
+    'com.qingmo.icon8': 80,
+    'com.qingmo.icon18': 180,
+    'com.qingmo.icon38': 380,
+    'com.qingmo.icon68': 680,
+    'com.qingmo.icon128': 1280,
+    'com.qingmo.icon268': 2680,
   };
 
   static const List<String> productIds = [
@@ -26,68 +28,119 @@ class IAPService {
   ];
 
   static bool _isAvailable = false;
-  static List<dynamic> _products = [];
-  static final List<Function(PurchaseDetails)> _purchaseCallbacks = [];
-  // 改进：使用交易ID而非产品ID追踪已处理的购买，允许重复购买同一产品
+  static bool _useMockPurchase = false;
+  static List<ProductDetails> _products = [];
   static final Set<String> _processedTransactions = {};
+  static final Set<String> _pendingProductIds = {};
+  static final Map<String, Timer> _purchaseTimeoutTimers = {};
 
-  /// 初始化内购
-  static Future<bool> init() async {
+  static final StreamController<String> _purchaseStartedController =
+      StreamController<String>.broadcast();
+  static final StreamController<PurchaseDetails> _purchaseSuccessController =
+      StreamController<PurchaseDetails>.broadcast();
+  static final StreamController<String> _purchaseErrorController =
+      StreamController<String>.broadcast();
+
+  static Stream<String> get purchaseStartedStream =>
+      _purchaseStartedController.stream;
+  static Stream<PurchaseDetails> get purchaseSuccessStream =>
+      _purchaseSuccessController.stream;
+  static Stream<String> get purchaseErrorStream =>
+      _purchaseErrorController.stream;
+
+  static int get _purchaseTimeoutSeconds => kDebugMode ? 120 : 60;
+
+  static bool get useMockPurchase => _useMockPurchase;
+
+  static Future<bool> _detectUseMockPurchase() async {
+    if (!kDebugMode || kIsWeb || !Platform.isIOS) return false;
     try {
-      _isAvailable = await _inAppPurchase.isAvailable();
-      if (!_isAvailable) {
-        print('内购不可用');
-        return false;
-      }
-
-      // 监听购买更新
-      _subscription = _inAppPurchase.purchaseStream.listen(
-        _handlePurchaseUpdate,
-        onError: (error) {
-          print('购买流错误: $error');
-        },
-      );
-
-      // 获取产品信息
-      await _loadProducts();
-      return true;
+      final iosInfo = await DeviceInfoPlugin().iosInfo;
+      return !iosInfo.isPhysicalDevice;
     } catch (e) {
-      print('初始化内购失败: $e');
+      debugPrint('[IAP] 模拟器检测失败: $e');
       return false;
     }
   }
 
-  /// 加载产品信息
-  static Future<void> _loadProducts() async {
+  static Future<bool> init() async {
+    try {
+      _useMockPurchase = await _detectUseMockPurchase();
+      if (_useMockPurchase) {
+        debugPrint('[IAP] 模拟器 Debug：本地模拟购买');
+      }
+
+      _isAvailable = await _inAppPurchase.isAvailable();
+      debugPrint('[IAP] StoreKit 可用: $_isAvailable, mock=$_useMockPurchase');
+
+      if (!_isAvailable && !_useMockPurchase) {
+        _notifyError('内购不可用');
+        return false;
+      }
+
+      if (_isAvailable) {
+        await _subscription?.cancel();
+        _subscription = _inAppPurchase.purchaseStream.listen(
+          _handlePurchaseUpdate,
+          onError: (error) {
+            debugPrint('[IAP] 购买流错误: $error');
+            _notifyError('购买流错误: $error');
+          },
+        );
+      }
+
+      await loadProducts();
+
+      if (_isAvailable && !_useMockPurchase) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        await _restorePendingPurchases();
+      }
+
+      return _useMockPurchase || _isAvailable;
+    } catch (e) {
+      debugPrint('[IAP] 初始化失败: $e');
+      _notifyError('初始化内购失败: $e');
+      return false;
+    }
+  }
+
+  static Future<void> _restorePendingPurchases() async {
+    try {
+      debugPrint('[IAP] 检查未完成交易...');
+      await _inAppPurchase.restorePurchases();
+    } catch (e) {
+      debugPrint('[IAP] 恢复交易失败: $e');
+    }
+  }
+
+  static Future<void> loadProducts() async {
+    if (_useMockPurchase) {
+      _products = _createMockProducts();
+      debugPrint('[IAP] 模拟产品 ${_products.length} 个');
+      return;
+    }
+
     try {
       final ProductDetailsResponse response =
           await _inAppPurchase.queryProductDetails(productIds.toSet());
 
       if (response.error != null) {
-        print('查询产品失败: ${response.error}');
-        
-        // 在模拟器或测试环境中，使用模拟数据
-        if (response.notFoundIDs.isNotEmpty && response.productDetails.isEmpty) {
-          print('使用模拟产品数据（开发模式）');
-          _products = _createMockProducts();
-          return;
-        }
-        return;
+        debugPrint('[IAP] 查询产品错误: ${response.error}');
+      }
+      if (response.notFoundIDs.isNotEmpty) {
+        debugPrint('[IAP] 未找到产品: ${response.notFoundIDs}');
       }
 
       _products = response.productDetails;
-      print('成功加载 ${_products.length} 个产品');
+      debugPrint('[IAP] 真实产品 ${_products.length}/${productIds.length} 个');
     } catch (e) {
-      print('加载产品失败: $e');
-      // 异常时也使用模拟数据
-      print('使用模拟产品数据（开发模式）');
-      _products = _createMockProducts();
+      debugPrint('[IAP] 加载产品异常: $e');
+      _products = [];
     }
   }
 
-  /// 创建模拟产品数据（用于开发和测试）
-  static List<dynamic> _createMockProducts() {
-    final mockPrices = {
+  static List<ProductDetails> _createMockProducts() {
+    const mockPrices = {
       'com.qingmo.icon8': '¥8.00',
       'com.qingmo.icon18': '¥18.00',
       'com.qingmo.icon38': '¥38.00',
@@ -97,55 +150,73 @@ class IAPService {
     };
 
     return productIds.map((id) {
-      return MockProductDetails(
+      return ProductDetails(
         id: id,
         title: '$id 金币套餐',
         description: '购买金币套餐',
         price: mockPrices[id] ?? '¥0.00',
+        rawPrice: 0,
+        currencyCode: 'CNY',
+        currencySymbol: '¥',
       );
     }).toList();
   }
 
-  /// 获取所有产品
-  static List<dynamic> getProducts() {
-    return _products;
-  }
+  static List<ProductDetails> getProducts() => _products;
 
-  /// 获取产品信息
-  static dynamic getProduct(String productId) {
-    try {
-      return _products.firstWhere((p) => p.id == productId);
-    } catch (e) {
-      return null;
+  static ProductDetails? getProduct(String productId) {
+    for (final product in _products) {
+      if (product.id == productId) return product;
     }
+    return null;
   }
 
-  /// 购买产品（消耗品）
   static Future<void> purchaseProduct(String productId) async {
+    if (_pendingProductIds.contains(productId)) {
+      _notifyError('正在处理上一笔购买，请稍候');
+      return;
+    }
+
     try {
+      if (!_useMockPurchase) {
+        await loadProducts();
+      }
+
       final product = getProduct(productId);
       if (product == null) {
-        print('产品不存在: $productId');
+        _notifyError('产品不存在，请确认 App Store Connect 已配置该产品');
         return;
       }
 
-      // 处理模拟产品的特殊情况
-      if (product is MockProductDetails) {
-        // 在模拟器中直接模拟购买成功
-        _simulatePurchase(productId);
+      _pendingProductIds.add(productId);
+      _notifyPurchaseStarted(productId);
+
+      if (_useMockPurchase) {
+        await _simulatePurchase(productId);
         return;
       }
 
-      final PurchaseParam purchaseParam = PurchaseParam(productDetails: product);
-      // 使用 buyConsumable 因为金币是消耗品
-      await _inAppPurchase.buyConsumable(purchaseParam: purchaseParam);
+      _setPurchaseTimeout(productId);
+
+      final started = await _inAppPurchase.buyConsumable(
+        purchaseParam: PurchaseParam(productDetails: product),
+        autoConsume: true,
+      );
+
+      if (!started) {
+        _clearPendingPurchase(productId);
+        _notifyError('无法发起购买，请稍后重试');
+      } else {
+        debugPrint('[IAP] 已发起购买: $productId');
+      }
     } catch (e) {
-      print('购买失败: $e');
+      _clearPendingPurchase(productId);
+      debugPrint('[IAP] 购买异常: $e');
+      _notifyError('购买失败: $e');
     }
   }
 
-  /// 模拟购买（用于开发和测试）
-  static void _simulatePurchase(String productId) {
+  static Future<void> _simulatePurchase(String productId) async {
     final transactionId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
     final mockPurchase = PurchaseDetails(
       productID: productId,
@@ -158,101 +229,132 @@ class IAPService {
         source: 'mock',
       ),
     );
-    
-    _handleSuccessfulPurchase(mockPurchase);
+
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    await _deliverPurchase(mockPurchase);
   }
 
-  /// 处理购买更新
   static void _handlePurchaseUpdate(List<PurchaseDetails> purchaseDetailsList) {
-    for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
-      if (purchaseDetails.status == PurchaseStatus.pending) {
-        print('购买待处理: ${purchaseDetails.productID}');
-      } else if (purchaseDetails.status == PurchaseStatus.error) {
-        print('购买错误: ${purchaseDetails.error}');
-        // 错误时立即完成购买
-        if (purchaseDetails.pendingCompletePurchase) {
-          _inAppPurchase.completePurchase(purchaseDetails);
-        }
-      } else if (purchaseDetails.status == PurchaseStatus.purchased) {
-        // 只处理新购买，不处理恢复购买
-        _handleSuccessfulPurchase(purchaseDetails);
-      } else if (purchaseDetails.status == PurchaseStatus.restored) {
-        // 恢复购买时只记录，不重复添加金币
-        print('购买已恢复: ${purchaseDetails.productID}');
-        if (purchaseDetails.pendingCompletePurchase) {
-          _inAppPurchase.completePurchase(purchaseDetails);
-        }
+    for (final purchaseDetails in purchaseDetailsList) {
+      final productId = purchaseDetails.productID;
+      debugPrint(
+        '[IAP] 状态: $productId -> ${purchaseDetails.status.name}'
+        '${purchaseDetails.error != null ? " (${purchaseDetails.error!.message})" : ""}',
+      );
+
+      switch (purchaseDetails.status) {
+        case PurchaseStatus.pending:
+          _setPurchaseTimeout(productId);
+          break;
+        case PurchaseStatus.canceled:
+          _clearPendingPurchase(productId);
+          _notifyError('已取消购买');
+          _finishTransaction(purchaseDetails);
+          break;
+        case PurchaseStatus.error:
+          _clearPendingPurchase(productId);
+          final message = purchaseDetails.error?.message ?? '未知错误';
+          _notifyError(
+            message.toLowerCase().contains('cancel') ? '已取消购买' : '购买错误: $message',
+          );
+          _finishTransaction(purchaseDetails);
+          break;
+        case PurchaseStatus.purchased:
+        case PurchaseStatus.restored:
+          _deliverPurchase(purchaseDetails);
+          break;
       }
     }
   }
 
-  /// 处理成功购买
-  static Future<void> _handleSuccessfulPurchase(PurchaseDetails purchaseDetails) async {
+  static Future<void> _deliverPurchase(PurchaseDetails purchaseDetails) async {
     final productId = purchaseDetails.productID;
-    
-    // 使用交易ID而非产品ID，允许重复购买同一产品
-    final transactionId = purchaseDetails.purchaseID ?? 
-                         '${productId}_${DateTime.now().millisecondsSinceEpoch}';
-    
-    // 检查是否已经处理过该交易
+    final transactionId = purchaseDetails.purchaseID ??
+        '${productId}_${DateTime.now().millisecondsSinceEpoch}';
+
     if (_processedTransactions.contains(transactionId)) {
-      print('交易已处理过: $transactionId');
-      // 仍然需要完成购买
-      if (purchaseDetails.pendingCompletePurchase) {
-        _inAppPurchase.completePurchase(purchaseDetails);
-      }
+      _clearPendingPurchase(productId);
+      await _finishTransaction(purchaseDetails);
       return;
     }
 
     final coins = productCoins[productId];
-
-    if (coins != null) {
-      try {
-        // 添加金币
-        await CoinService.addCoins(coins, reason: '充值 - $productId');
-        print('购买成功: $productId, 获得 $coins 金币');
-
-        // 标记为已处理
-        _processedTransactions.add(transactionId);
-
-        // 触发回调
-        for (final callback in _purchaseCallbacks) {
-          callback(purchaseDetails);
-        }
-      } catch (e) {
-        print('添加金币失败: $e');
-        // 金币添加失败，不完成购买，用户可以重试
-        return;
-      }
+    if (coins == null) {
+      _clearPendingPurchase(productId);
+      _notifyError('产品配置错误: $productId');
+      await _finishTransaction(purchaseDetails);
+      return;
     }
 
-    // 金币添加成功后才完成购买
-    if (purchaseDetails.pendingCompletePurchase) {
-      _inAppPurchase.completePurchase(purchaseDetails);
-    }
-  }
-
-  /// 注册购买成功回调
-  static void onPurchaseSuccess(Function(PurchaseDetails) callback) {
-    _purchaseCallbacks.add(callback);
-  }
-
-  /// 清除所有回调
-  static void clearPurchaseCallbacks() {
-    _purchaseCallbacks.clear();
-  }
-
-  /// 恢复购买
-  static Future<void> restorePurchases() async {
     try {
-      await _inAppPurchase.restorePurchases();
-      print('购买已恢复');
+      await CoinService.addCoins(coins, reason: '充值 - $productId');
+      _processedTransactions.add(transactionId);
+      debugPrint('[IAP] 充值成功: +$coins 金币 ($productId)');
+
+      if (!_purchaseSuccessController.isClosed) {
+        _purchaseSuccessController.add(purchaseDetails);
+      }
     } catch (e) {
-      print('恢复购买失败: $e');
+      debugPrint('[IAP] 金币到账失败: $e');
+      _notifyError('充值失败: $e');
+      return;
+    } finally {
+      _clearPendingPurchase(productId);
+    }
+
+    await _finishTransaction(purchaseDetails);
+  }
+
+  static Future<void> _finishTransaction(PurchaseDetails purchaseDetails) async {
+    if (!purchaseDetails.pendingCompletePurchase) return;
+    try {
+      await _inAppPurchase.completePurchase(purchaseDetails);
+      debugPrint('[IAP] 交易已完成: ${purchaseDetails.productID}');
+    } catch (e) {
+      debugPrint('[IAP] completePurchase 失败: $e');
+      _notifyError('完成购买失败: $e');
     }
   }
 
-  /// 获取产品价格和金币
+  static void _setPurchaseTimeout(String productId) {
+    _purchaseTimeoutTimers[productId]?.cancel();
+    _purchaseTimeoutTimers[productId] = Timer(
+      Duration(seconds: _purchaseTimeoutSeconds),
+      () {
+        if (_pendingProductIds.contains(productId)) {
+          _clearPendingPurchase(productId);
+          _notifyError(
+            kDebugMode
+                ? '购买超时。请确认已在「设置→开发者→Sandbox Apple Account」登录沙盒账号，支付完成后需双击侧边键/Face ID 确认'
+                : '购买超时，请重试',
+          );
+        }
+      },
+    );
+  }
+
+  static void _clearPendingPurchase(String productId) {
+    _pendingProductIds.remove(productId);
+    _purchaseTimeoutTimers.remove(productId)?.cancel();
+  }
+
+  static void _notifyPurchaseStarted(String productId) {
+    if (!_purchaseStartedController.isClosed) {
+      _purchaseStartedController.add(productId);
+    }
+  }
+
+  static void _notifyError(String message) {
+    debugPrint('[IAP] 错误: $message');
+    if (!_purchaseErrorController.isClosed) {
+      _purchaseErrorController.add(message);
+    }
+  }
+
+  static Future<void> restorePurchases() async {
+    await _restorePendingPurchases();
+  }
+
   static Map<String, dynamic>? getProductInfo(String productId) {
     final product = getProduct(productId);
     if (product == null) return null;
@@ -266,30 +368,21 @@ class IAPService {
     };
   }
 
-  /// 清理资源
   static Future<void> dispose() async {
-    await _subscription.cancel();
-    _purchaseCallbacks.clear();
+    await _subscription?.cancel();
+    _subscription = null;
     _processedTransactions.clear();
+    _pendingProductIds.clear();
+    for (final timer in _purchaseTimeoutTimers.values) {
+      timer.cancel();
+    }
+    _purchaseTimeoutTimers.clear();
+    await _purchaseStartedController.close();
+    await _purchaseSuccessController.close();
+    await _purchaseErrorController.close();
   }
 
-  /// 检查内购是否可用
-  static bool isAvailable() {
-    return _isAvailable;
-  }
-}
+  static bool isAvailable() => _isAvailable || _useMockPurchase;
 
-/// 模拟产品详情类（用于开发和测试）
-class MockProductDetails {
-  final String id;
-  final String title;
-  final String description;
-  final String price;
-
-  MockProductDetails({
-    required this.id,
-    required this.title,
-    required this.description,
-    required this.price,
-  });
+  static int get loadedProductCount => _products.length;
 }

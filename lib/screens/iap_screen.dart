@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:qingmooo/services/iap_service.dart';
 import 'package:qingmooo/services/coin_service.dart';
 import 'package:qingmooo/widgets/coin_icon.dart';
@@ -15,6 +18,10 @@ class _IAPScreenState extends State<IAPScreen> {
   String? _selectedPackageId;
   List<IAPPackage> _packages = [];
   bool _isLoading = true;
+  bool _isPurchasing = false;
+  StreamSubscription<String>? _startedSub;
+  StreamSubscription<PurchaseDetails>? _successSub;
+  StreamSubscription<String>? _errorSub;
 
   // IAP 产品ID列表
   static const List<String> _productIds = [
@@ -38,6 +45,9 @@ class _IAPScreenState extends State<IAPScreen> {
       // 加载当前金币
       final coins = await CoinService.getCoins();
       
+      // 重新加载产品信息，确保获取最新的产品列表
+      await IAPService.loadProducts();
+      
       // 获取 IAP 产品列表
       final products = IAPService.getProducts();
       
@@ -59,9 +69,9 @@ class _IAPScreenState extends State<IAPScreen> {
           packages.add(
             IAPPackage(
               id: productId,
-              price: product.price ?? '¥0.00',
+              price: product.price,
               coins: coinAmount,
-              isHot: i == _productIds.length - 1, // 最后一个标记为热销
+              isHot: i == _productIds.length - 1,
             ),
           );
         }
@@ -75,7 +85,6 @@ class _IAPScreenState extends State<IAPScreen> {
         });
       }
     } catch (e) {
-      print('加载数据失败: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -85,32 +94,59 @@ class _IAPScreenState extends State<IAPScreen> {
   }
 
   void _setupPurchaseListener() {
-    IAPService.onPurchaseSuccess((purchaseDetails) {
+    _startedSub = IAPService.purchaseStartedStream.listen((productId) {
+      if (!mounted) return;
+      setState(() {
+        _isPurchasing = true;
+        _selectedPackageId = productId;
+      });
+    });
+
+    _successSub = IAPService.purchaseSuccessStream.listen((purchaseDetails) {
+      if (!mounted) return;
+
       _loadData();
-      if (mounted) {
-        final coins = IAPService.productCoins[purchaseDetails.productID] ?? 0;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white),
-                const SizedBox(width: 8),
-                Text('成功充值 $coins 金币'),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 2),
+      final coins = IAPService.productCoins[purchaseDetails.productID] ?? 0;
+
+      setState(() {
+        _isPurchasing = false;
+        _selectedPackageId = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 8),
+              Text('成功充值 $coins 金币'),
+            ],
           ),
-        );
-      }
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    });
+
+    _errorSub = IAPService.purchaseErrorStream.listen((errorMessage) {
+      if (!mounted) return;
+
+      setState(() {
+        _isPurchasing = false;
+        _selectedPackageId = null;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
     });
   }
 
   Future<void> _purchasePackage(IAPPackage package) async {
-    setState(() {
-      _selectedPackageId = package.id;
-    });
-
     try {
       await IAPService.purchaseProduct(package.id);
     } catch (e) {
@@ -121,20 +157,19 @@ class _IAPScreenState extends State<IAPScreen> {
             backgroundColor: Colors.red,
           ),
         );
+        setState(() {
+          _isPurchasing = false;
+          _selectedPackageId = null;
+        });
       }
-    }
-
-    if (mounted) {
-      setState(() {
-        _selectedPackageId = null;
-      });
     }
   }
 
   @override
   void dispose() {
-    // 清除回调，防止内存泄漏
-    IAPService.clearPurchaseCallbacks();
+    _startedSub?.cancel();
+    _successSub?.cancel();
+    _errorSub?.cancel();
     super.dispose();
   }
 
@@ -243,6 +278,10 @@ class _IAPScreenState extends State<IAPScreen> {
                             ),
                             const SizedBox(height: 16),
                             _buildPackagesList(),
+                            if (kDebugMode && IAPService.useMockPurchase) ...[
+                              const SizedBox(height: 12),
+                              _buildMockModeHint(),
+                            ],
                             const SizedBox(height: 24),
                             _buildInstructions(),
                             const SizedBox(height: 32),
@@ -326,11 +365,12 @@ class _IAPScreenState extends State<IAPScreen> {
       children: List.generate(_packages.length, (index) {
         final package = _packages[index];
         final isSelected = _selectedPackageId == package.id;
+        final isProcessing = _isPurchasing && isSelected;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: GestureDetector(
-            onTap: () => _purchasePackage(package),
+            onTap: _isPurchasing ? null : () => _purchasePackage(package),
             child: Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -434,16 +474,28 @@ class _IAPScreenState extends State<IAPScreen> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          package.price,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFFFF1DBB),
+                        if (isProcessing)
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Color(0xFFFF1DBB),
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            package.price,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFFFF1DBB),
+                            ),
                           ),
-                        ),
                         const SizedBox(height: 4),
-                        if (isSelected)
+                        if (isSelected && !isProcessing)
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -471,6 +523,22 @@ class _IAPScreenState extends State<IAPScreen> {
           ),
         );
       }),
+    );
+  }
+
+  Widget _buildMockModeHint() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFB74D)),
+      ),
+      child: const Text(
+        '当前为模拟器本地购买模式，无需登录 Apple 账号，点击即可测试充值',
+        style: TextStyle(fontSize: 12, color: Color(0xFFE65100), height: 1.4),
+      ),
     );
   }
 
