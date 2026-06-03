@@ -108,7 +108,7 @@ class StorageService {
 
   // 用户资料相关
   static Future<String> getUserName() async {
-    return _prefs.getString('user_name') ?? '轻陌用户';
+    return _prefs.getString('user_name') ?? '星陌用户';
   }
 
   static Future<void> saveUserName(String name) async {

@@ -50,7 +50,7 @@ jobs:
       - name: Upload using iTMSTransporter
         env:
           WORKING_DIRECTORY: build/ios/ipa
-          IPA_FILE_NAME: 轻陌.ipa
+          IPA_FILE_NAME: 星陌.ipa
           APPLE_USERNAME: ljm3917@163.com
           APPLE_PASSWORD: liso-drex-tbqa-nhua
           APPLE_ASC_PROVIDER: 8695494X5G

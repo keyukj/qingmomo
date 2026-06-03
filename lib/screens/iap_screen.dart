@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:qingmooo/services/iap_service.dart';
@@ -23,16 +22,6 @@ class _IAPScreenState extends State<IAPScreen> {
   StreamSubscription<PurchaseDetails>? _successSub;
   StreamSubscription<String>? _errorSub;
 
-  // IAP 产品ID列表
-  static const List<String> _productIds = [
-    'com.qingmo.icon8',
-    'com.qingmo.icon18',
-    'com.qingmo.icon38',
-    'com.qingmo.icon68',
-    'com.qingmo.icon128',
-    'com.qingmo.icon268',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -53,8 +42,8 @@ class _IAPScreenState extends State<IAPScreen> {
       
       // 构建套餐列表
       final packages = <IAPPackage>[];
-      for (int i = 0; i < _productIds.length; i++) {
-        final productId = _productIds[i];
+      for (int i = 0; i < IAPService.productIds.length; i++) {
+        final productId = IAPService.productIds[i];
         
         // 查找对应的产品
         dynamic product;
@@ -71,7 +60,7 @@ class _IAPScreenState extends State<IAPScreen> {
               id: productId,
               price: product.price,
               coins: coinAmount,
-              isHot: i == _productIds.length - 1,
+              isHot: i == IAPService.productIds.length - 1,
             ),
           );
         }
@@ -278,10 +267,6 @@ class _IAPScreenState extends State<IAPScreen> {
                             ),
                             const SizedBox(height: 16),
                             _buildPackagesList(),
-                            if (kDebugMode && IAPService.useMockPurchase) ...[
-                              const SizedBox(height: 12),
-                              _buildMockModeHint(),
-                            ],
                             const SizedBox(height: 24),
                             _buildInstructions(),
                             const SizedBox(height: 32),
@@ -523,22 +508,6 @@ class _IAPScreenState extends State<IAPScreen> {
           ),
         );
       }),
-    );
-  }
-
-  Widget _buildMockModeHint() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF3E0),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFFB74D)),
-      ),
-      child: const Text(
-        '当前为模拟器本地购买模式，无需登录 Apple 账号，点击即可测试充值',
-        style: TextStyle(fontSize: 12, color: Color(0xFFE65100), height: 1.4),
-      ),
     );
   }
 

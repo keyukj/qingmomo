@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:qingmooo/constants/app_info.dart';
 import 'package:qingmooo/screens/login_screen.dart';
 import 'package:qingmooo/screens/onboarding_screen.dart';
 import 'package:qingmooo/services/storage_service.dart';
@@ -163,8 +164,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                     opacity: _fadeAnimation,
                     child: Column(
                       children: [
-                        const Text(
-                          '轻陌',
+                        Text(
+                          AppInfo.appName,
                           style: TextStyle(
                             fontSize: 42,
                             fontWeight: FontWeight.w700,

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import 'package:qingmooo/constants/app_info.dart';
+import 'package:qingmooo/constants/legal_documents.dart';
 import 'package:qingmooo/main.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:qingmooo/screens/legal_document_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -110,11 +112,16 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 
-  Future<void> _launchURL(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-    }
+  void _openLegalDocument(String title, String content) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => LegalDocumentScreen(
+          title: title,
+          content: content,
+        ),
+      ),
+    );
   }
 
   @override
@@ -173,8 +180,8 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                       ),
                       const SizedBox(height: 40),
                       // App名称
-                      const Text(
-                        '轻陌',
+                      Text(
+                        AppInfo.appName,
                         style: TextStyle(
                           fontSize: 38,
                           fontWeight: FontWeight.w700,
@@ -274,7 +281,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                     ),
                                     recognizer: TapGestureRecognizer()
                                       ..onTap = () {
-                                        _launchURL('http://activity.amoqia.com/proto/user_aware.html');
+                                        _openLegalDocument(
+                                          LegalDocuments.userTermsTitle,
+                                          LegalDocuments.userTermsContent,
+                                        );
                                       },
                                   ),
                                   const TextSpan(text: '和'),
@@ -286,7 +296,10 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                                     ),
                                     recognizer: TapGestureRecognizer()
                                       ..onTap = () {
-                                        _launchURL('http://activity.amoqia.com/proto/privacy.html');
+                                        _openLegalDocument(
+                                          LegalDocuments.privacyPolicyTitle,
+                                          LegalDocuments.privacyPolicyContent,
+                                        );
                                       },
                                   ),
                                 ],

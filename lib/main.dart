@@ -24,7 +24,7 @@ class QingmoooApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: '轻陌',
+      title: '星陌',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primaryColor: const Color(0xFFFF1DBB),
@@ -78,7 +78,6 @@ class _MainScreenState extends State<MainScreen> {
       body: Stack(
         children: [
           _pages[_currentIndex],
-          // 悬浮发布按钮 - 只在推荐页显示
           if (_currentIndex == 1)
             Positioned(
               right: 16,
@@ -118,7 +117,6 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               ),
             ),
-          // 注销按钮 - 右上角
           Positioned(
             top: 48,
             right: 24,

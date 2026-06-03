@@ -11,8 +11,9 @@ import 'package:qingmooo/screens/about_screen.dart';
 import 'package:qingmooo/screens/complaint_screen.dart';
 import 'package:qingmooo/screens/my_posts_screen.dart';
 import 'package:qingmooo/screens/iap_screen.dart';
+import 'package:qingmooo/constants/legal_documents.dart';
+import 'package:qingmooo/screens/legal_document_screen.dart';
 import 'package:qingmooo/widgets/coin_icon.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'dart:io';
 
 class ProfileScreen extends StatefulWidget {
@@ -24,7 +25,7 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   late User _user;
-  String _userName = '轻陌用户';
+  String _userName = '星陌用户';
   String _userBio = '这个人很懒，什么都没留下';
   String _userAvatar = 'assets/images/tx.jpg';
   int _currentCoins = 0;
@@ -69,19 +70,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     
     if (mounted) {
       _loadUserData();
-    }
-  }
-
-  Future<void> _launchURL(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法打开链接')),
-        );
-      }
     }
   }
 
@@ -447,9 +435,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
             MaterialPageRoute(builder: (context) => const ComplaintScreen()),
           );
         } else if (title == '隐私协议') {
-          _launchURL('http://activity.amoqia.com/proto/privacy.html');
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LegalDocumentScreen(
+                title: LegalDocuments.privacyPolicyTitle,
+                content: LegalDocuments.privacyPolicyContent,
+              ),
+            ),
+          );
         } else if (title == '用户须知') {
-          _launchURL('http://activity.amoqia.com/proto/user_aware.html');
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LegalDocumentScreen(
+                title: LegalDocuments.userTermsTitle,
+                content: LegalDocuments.userTermsContent,
+              ),
+            ),
+          );
         } else if (title == '关于我们') {
           Navigator.push(
             context,

@@ -57,8 +57,7 @@ class IAPService {
     try {
       final iosInfo = await DeviceInfoPlugin().iosInfo;
       return !iosInfo.isPhysicalDevice;
-    } catch (e) {
-      debugPrint('[IAP] 模拟器检测失败: $e');
+    } catch (_) {
       return false;
     }
   }
@@ -66,12 +65,7 @@ class IAPService {
   static Future<bool> init() async {
     try {
       _useMockPurchase = await _detectUseMockPurchase();
-      if (_useMockPurchase) {
-        debugPrint('[IAP] 模拟器 Debug：本地模拟购买');
-      }
-
       _isAvailable = await _inAppPurchase.isAvailable();
-      debugPrint('[IAP] StoreKit 可用: $_isAvailable, mock=$_useMockPurchase');
 
       if (!_isAvailable && !_useMockPurchase) {
         _notifyError('内购不可用');
@@ -82,10 +76,7 @@ class IAPService {
         await _subscription?.cancel();
         _subscription = _inAppPurchase.purchaseStream.listen(
           _handlePurchaseUpdate,
-          onError: (error) {
-            debugPrint('[IAP] 购买流错误: $error');
-            _notifyError('购买流错误: $error');
-          },
+          onError: (error) => _notifyError('购买流错误: $error'),
         );
       }
 
@@ -98,7 +89,6 @@ class IAPService {
 
       return _useMockPurchase || _isAvailable;
     } catch (e) {
-      debugPrint('[IAP] 初始化失败: $e');
       _notifyError('初始化内购失败: $e');
       return false;
     }
@@ -106,35 +96,21 @@ class IAPService {
 
   static Future<void> _restorePendingPurchases() async {
     try {
-      debugPrint('[IAP] 检查未完成交易...');
       await _inAppPurchase.restorePurchases();
-    } catch (e) {
-      debugPrint('[IAP] 恢复交易失败: $e');
-    }
+    } catch (_) {}
   }
 
   static Future<void> loadProducts() async {
     if (_useMockPurchase) {
       _products = _createMockProducts();
-      debugPrint('[IAP] 模拟产品 ${_products.length} 个');
       return;
     }
 
     try {
-      final ProductDetailsResponse response =
+      final response =
           await _inAppPurchase.queryProductDetails(productIds.toSet());
-
-      if (response.error != null) {
-        debugPrint('[IAP] 查询产品错误: ${response.error}');
-      }
-      if (response.notFoundIDs.isNotEmpty) {
-        debugPrint('[IAP] 未找到产品: ${response.notFoundIDs}');
-      }
-
       _products = response.productDetails;
-      debugPrint('[IAP] 真实产品 ${_products.length}/${productIds.length} 个');
-    } catch (e) {
-      debugPrint('[IAP] 加载产品异常: $e');
+    } catch (_) {
       _products = [];
     }
   }
@@ -184,7 +160,7 @@ class IAPService {
 
       final product = getProduct(productId);
       if (product == null) {
-        _notifyError('产品不存在，请确认 App Store Connect 已配置该产品');
+        _notifyError('产品不存在，请稍后重试');
         return;
       }
 
@@ -206,21 +182,17 @@ class IAPService {
       if (!started) {
         _clearPendingPurchase(productId);
         _notifyError('无法发起购买，请稍后重试');
-      } else {
-        debugPrint('[IAP] 已发起购买: $productId');
       }
     } catch (e) {
       _clearPendingPurchase(productId);
-      debugPrint('[IAP] 购买异常: $e');
       _notifyError('购买失败: $e');
     }
   }
 
   static Future<void> _simulatePurchase(String productId) async {
-    final transactionId = 'mock_${DateTime.now().millisecondsSinceEpoch}';
     final mockPurchase = PurchaseDetails(
       productID: productId,
-      purchaseID: transactionId,
+      purchaseID: 'mock_${DateTime.now().millisecondsSinceEpoch}',
       transactionDate: DateTime.now().toIso8601String(),
       status: PurchaseStatus.purchased,
       verificationData: PurchaseVerificationData(
@@ -237,10 +209,6 @@ class IAPService {
   static void _handlePurchaseUpdate(List<PurchaseDetails> purchaseDetailsList) {
     for (final purchaseDetails in purchaseDetailsList) {
       final productId = purchaseDetails.productID;
-      debugPrint(
-        '[IAP] 状态: $productId -> ${purchaseDetails.status.name}'
-        '${purchaseDetails.error != null ? " (${purchaseDetails.error!.message})" : ""}',
-      );
 
       switch (purchaseDetails.status) {
         case PurchaseStatus.pending:
@@ -281,7 +249,7 @@ class IAPService {
     final coins = productCoins[productId];
     if (coins == null) {
       _clearPendingPurchase(productId);
-      _notifyError('产品配置错误: $productId');
+      _notifyError('产品配置错误');
       await _finishTransaction(purchaseDetails);
       return;
     }
@@ -289,13 +257,10 @@ class IAPService {
     try {
       await CoinService.addCoins(coins, reason: '充值 - $productId');
       _processedTransactions.add(transactionId);
-      debugPrint('[IAP] 充值成功: +$coins 金币 ($productId)');
-
       if (!_purchaseSuccessController.isClosed) {
         _purchaseSuccessController.add(purchaseDetails);
       }
     } catch (e) {
-      debugPrint('[IAP] 金币到账失败: $e');
       _notifyError('充值失败: $e');
       return;
     } finally {
@@ -309,9 +274,7 @@ class IAPService {
     if (!purchaseDetails.pendingCompletePurchase) return;
     try {
       await _inAppPurchase.completePurchase(purchaseDetails);
-      debugPrint('[IAP] 交易已完成: ${purchaseDetails.productID}');
     } catch (e) {
-      debugPrint('[IAP] completePurchase 失败: $e');
       _notifyError('完成购买失败: $e');
     }
   }
@@ -323,11 +286,7 @@ class IAPService {
       () {
         if (_pendingProductIds.contains(productId)) {
           _clearPendingPurchase(productId);
-          _notifyError(
-            kDebugMode
-                ? '购买超时。请确认已在「设置→开发者→Sandbox Apple Account」登录沙盒账号，支付完成后需双击侧边键/Face ID 确认'
-                : '购买超时，请重试',
-          );
+          _notifyError('购买超时，请重试');
         }
       },
     );
@@ -345,7 +304,6 @@ class IAPService {
   }
 
   static void _notifyError(String message) {
-    debugPrint('[IAP] 错误: $message');
     if (!_purchaseErrorController.isClosed) {
       _purchaseErrorController.add(message);
     }
@@ -383,6 +341,4 @@ class IAPService {
   }
 
   static bool isAvailable() => _isAvailable || _useMockPurchase;
-
-  static int get loadedProductCount => _products.length;
 }
